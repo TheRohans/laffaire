@@ -96,10 +96,11 @@ func newTestDB(t *testing.T) *sqlx.DB {
 	return db
 }
 
-// newTestEnv creates an Env wired to db, authenticated as userUUID.
-// Auth middleware is not used in tests — env.User is set directly here,
-// mirroring what LoginVerify / APILoginVerify would do in production.
-func newTestEnv(t *testing.T, db *sqlx.DB, userUUID string) *env.Env {
+// newTestEnv creates an Env wired to db. The authenticated user is no
+// longer part of Env (it's per-request, carried on context - see
+// internals/env.WithUser) - apiRouter below attaches it per test router
+// instead, mirroring what LoginVerify / APILoginVerify do in production.
+func newTestEnv(t *testing.T, db *sqlx.DB) *env.Env {
 	t.Helper()
 	repo := repository.Attach("", db, "sqlite3")
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -107,14 +108,24 @@ func newTestEnv(t *testing.T, db *sqlx.DB, userUUID string) *env.Env {
 		Db:   db,
 		Log:  log,
 		Repo: repo,
-		User: &models.User{UUID: userUUID, Email: userUUID + "@test.example"},
 	}
 }
 
-// apiRouter wires all JSON API routes for e with no auth middleware.
-func apiRouter(e *env.Env) *mux.Router {
+func testUser(userUUID string) *models.User {
+	return &models.User{UUID: userUUID, Email: userUUID + "@test.example"}
+}
+
+// apiRouter wires all JSON API routes for e, with every request
+// authenticated as user via request context (no real auth middleware in
+// tests, but the same mechanism production uses to attach it).
+func apiRouter(e *env.Env, user *models.User) *mux.Router {
 	router := mux.NewRouter()
 	api := router.PathPrefix("/api/v1").Subrouter()
+	api.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r.WithContext(env.WithUser(r.Context(), user)))
+		})
+	})
 	api.HandleFunc("/events", handlers.APIGetEvents(e)).Methods("GET")
 	api.HandleFunc("/events", handlers.APICreateEvent(e)).Methods("POST")
 	api.HandleFunc("/events/{id}", handlers.APIGetEvent(e)).Methods("GET")
@@ -162,11 +173,9 @@ func mustDecode[T any](t *testing.T, body []byte) T {
 
 func TestAPIEvents(t *testing.T) {
 	db := newTestDB(t)
-	e := newTestEnv(t, db, testUserUUID)
-	router := apiRouter(e)
-
-	otherE := newTestEnv(t, db, otherUserUUID)
-	otherRouter := apiRouter(otherE)
+	e := newTestEnv(t, db)
+	router := apiRouter(e, testUser(testUserUUID))
+	otherRouter := apiRouter(e, testUser(otherUserUUID))
 
 	// eventID is populated by the "POST creates event" sub-test and used by
 	// all subsequent sub-tests. Sub-tests run sequentially (no t.Parallel).
@@ -297,11 +306,9 @@ func TestAPIEvents(t *testing.T) {
 
 func TestAPIEntries(t *testing.T) {
 	db := newTestDB(t)
-	e := newTestEnv(t, db, testUserUUID)
-	router := apiRouter(e)
-
-	otherE := newTestEnv(t, db, otherUserUUID)
-	otherRouter := apiRouter(otherE)
+	e := newTestEnv(t, db)
+	router := apiRouter(e, testUser(testUserUUID))
+	otherRouter := apiRouter(e, testUser(otherUserUUID))
 
 	// Create a parent event for all entry sub-tests.
 	setupRec := do(t, router, "POST", "/api/v1/events", []byte(`{"title":"Test Calendar"}`))

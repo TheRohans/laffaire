@@ -70,40 +70,40 @@ func createDateTime(date string, time string) string {
 	return date
 }
 
-func IcalPage(env *env.Env, t *template.Template) http.HandlerFunc {
+func IcalPage(e *env.Env, t *template.Template) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
-		env.Log.Debug("ical request", "id", vars["id"])
+		e.Log.Debug("ical request", "id", vars["id"])
 
 		eventUuid, _ := uuid.Parse(vars["id"])
 
-		event, err := env.Repo.GetEventById(eventUuid)
+		event, err := e.Repo.GetEventById(eventUuid)
 		if err != nil {
-			env.Log.Error("cannot get the event from the db", "error", err)
+			e.Log.Error("cannot get the event from the db", "error", err)
 			return
 		}
 
 		timezone := "UTC"
 		ownerUuid, err := uuid.Parse(event.UserId)
 		if err == nil {
-			owner, err := env.Repo.GetUserById(ownerUuid)
+			owner, err := e.Repo.GetUserById(ownerUuid)
 			if err == nil && owner != nil && owner.Timezone != nil && *owner.Timezone != "" {
 				timezone = *owner.Timezone
 			}
 		}
 
-		entries, err := env.Repo.GetEntriesByEventId(eventUuid)
+		entries, err := e.Repo.GetEntriesByEventId(eventUuid)
 		if err != nil {
-			env.Log.Error("cannot get the entries from the db", "error", err)
+			e.Log.Error("cannot get the entries from the db", "error", err)
 			return
 		}
 
-		env.Log.Debug("fetched entries", "count", len(*entries))
+		e.Log.Debug("fetched entries", "count", len(*entries))
 
 		calendarName := event.Title
 		prodIdName := strings.ReplaceAll(calendarName, "//", "-")
 		var ics bytes.Buffer
-		env.Log.Debug("creating prolog")
+		e.Log.Debug("creating prolog")
 		ical.Prolog(&ics, calendarName, fmt.Sprintf("-//Laffaire/%v//EN", prodIdName), timezone)
 		for i := 0; i < len(*entries); i++ {
 			e := (*entries)[i]
@@ -139,7 +139,7 @@ func IcalPage(env *env.Env, t *template.Template) http.HandlerFunc {
 				ics.WriteString("END:VEVENT\r\n")
 			}
 		}
-		env.Log.Debug("writing epilog")
+		e.Log.Debug("writing epilog")
 		ical.Epilog(&ics)
 
 		w.Header().Set("Content-Type", "text/calendar")
@@ -147,14 +147,14 @@ func IcalPage(env *env.Env, t *template.Template) http.HandlerFunc {
 	}
 }
 
-func EntriesPage(env *env.Env, t *template.Template) http.HandlerFunc {
+func EntriesPage(e *env.Env, t *template.Template) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		page := "entries.html"
 		pd := entriesListPageData{
 			pageData{
 				"Laffaire Home",
 				"Laffaire",
-				env.User,
+				env.UserFromContext(r.Context()),
 			},
 			nil,
 			nil,
@@ -162,9 +162,9 @@ func EntriesPage(env *env.Env, t *template.Template) http.HandlerFunc {
 
 		eventId := r.URL.Query().Get("event")
 		eventUuid, _ := uuid.Parse(eventId)
-		entries, err := env.Repo.GetEntriesByEventId(eventUuid)
+		entries, err := e.Repo.GetEntriesByEventId(eventUuid)
 		if err != nil {
-			env.Log.Error("cannot get entries from the db", "error", err)
+			e.Log.Error("cannot get entries from the db", "error", err)
 			return
 		}
 
@@ -177,14 +177,14 @@ func EntriesPage(env *env.Env, t *template.Template) http.HandlerFunc {
 	}
 }
 
-func EntryPage(env *env.Env, t *template.Template) http.HandlerFunc {
+func EntryPage(e *env.Env, t *template.Template) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		page := "entry.html"
 		pd := entryPageData{
 			pageData{
 				"Laffaire Home",
 				"Laffaire",
-				env.User,
+				env.UserFromContext(r.Context()),
 			},
 			nil,
 		}
@@ -194,14 +194,14 @@ func EntryPage(env *env.Env, t *template.Template) http.HandlerFunc {
 		if eventUuid == "" {
 			eventUuid = r.URL.Query().Get("event")
 		}
-		env.Log.Debug("have event uuid", "uuid", eventUuid)
+		e.Log.Debug("have event uuid", "uuid", eventUuid)
 
 		switch r.Method {
 		case "POST":
 			r.ParseForm()
 			entryUuid := r.FormValue("entry_uuid")
 
-			env.Log.Debug("entry uuid from form", "uuid", entryUuid)
+			e.Log.Debug("entry uuid from form", "uuid", entryUuid)
 
 			allday := r.FormValue("all_day_event")
 			private := r.FormValue("private")
@@ -220,9 +220,9 @@ func EntryPage(env *env.Env, t *template.Template) http.HandlerFunc {
 					Location:    r.FormValue("location"),
 					Private:     (private == "on"),
 				}
-				err := env.Repo.UpsertEntry(&entry)
+				err := e.Repo.UpsertEntry(&entry)
 				if err != nil {
-					env.Log.Error("upsert error", "error", err)
+					e.Log.Error("upsert error", "error", err)
 					return
 				}
 
@@ -233,12 +233,12 @@ func EntryPage(env *env.Env, t *template.Template) http.HandlerFunc {
 			if entryUuid != "" {
 				entryId, err := uuid.Parse(entryUuid)
 				if err != nil {
-					env.Log.Error("cannot parse entry uuid", "error", err)
+					e.Log.Error("cannot parse entry uuid", "error", err)
 					return
 				}
-				entry, err := env.Repo.GetEntryById(entryId)
+				entry, err := e.Repo.GetEntryById(entryId)
 				if err != nil {
-					env.Log.Error("cannot get entry from the db", "error", err)
+					e.Log.Error("cannot get entry from the db", "error", err)
 					return
 				}
 				pd.Entry = entry
@@ -250,14 +250,14 @@ func EntryPage(env *env.Env, t *template.Template) http.HandlerFunc {
 				pd.Entry = &entry
 			}
 		case "DELETE":
-			env.Log.Debug("delete entry")
+			e.Log.Debug("delete entry")
 			entryUuid := r.URL.Query().Get("entry")
 			eventUuid := r.URL.Query().Get("event")
-			env.Log.Debug("delete entry", "entry", entryUuid, "event", eventUuid)
+			e.Log.Debug("delete entry", "entry", entryUuid, "event", eventUuid)
 
-			err := env.Repo.DeleteEntry(entryUuid, eventUuid)
+			err := e.Repo.DeleteEntry(entryUuid, eventUuid)
 			if err != nil {
-				env.Log.Error("cannot delete the entry from the db", "error", err)
+				e.Log.Error("cannot delete the entry from the db", "error", err)
 				return
 			}
 			http.Redirect(w, r, "/-/entries?event="+eventUuid, http.StatusTemporaryRedirect)
@@ -270,14 +270,15 @@ func EntryPage(env *env.Env, t *template.Template) http.HandlerFunc {
 	}
 }
 
-func EventsPage(env *env.Env, t *template.Template) http.HandlerFunc {
+func EventsPage(e *env.Env, t *template.Template) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		page := "events.html"
 
-		userId, _ := uuid.Parse(env.User.UUID)
-		events, err := env.Repo.GetEventsByUserId(userId)
+		user := env.UserFromContext(r.Context())
+		userId, _ := uuid.Parse(user.UUID)
+		events, err := e.Repo.GetEventsByUserId(userId)
 		if err != nil {
-			env.Log.Error("events query errored", "error", err)
+			e.Log.Error("events query errored", "error", err)
 			return
 		}
 
@@ -285,7 +286,7 @@ func EventsPage(env *env.Env, t *template.Template) http.HandlerFunc {
 			pageData{
 				"Laffaire Home",
 				"Laffaire",
-				env.User,
+				user,
 			},
 			events,
 		}
@@ -295,15 +296,16 @@ func EventsPage(env *env.Env, t *template.Template) http.HandlerFunc {
 	}
 }
 
-func EventPage(env *env.Env, t *template.Template) http.HandlerFunc {
+func EventPage(e *env.Env, t *template.Template) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		page := "event.html"
 
+		user := env.UserFromContext(r.Context())
 		pd := eventPageData{
 			pageData{
 				"Laffaire Home",
 				"Laffaire",
-				env.User,
+				user,
 			},
 			nil,
 		}
@@ -312,16 +314,16 @@ func EventPage(env *env.Env, t *template.Template) http.HandlerFunc {
 		case "POST":
 			r.ParseForm()
 			eventUuid := r.FormValue("event_uuid")
-			env.Log.Debug("event uuid from form", "uuid", eventUuid)
+			e.Log.Debug("event uuid from form", "uuid", eventUuid)
 
 			if eventUuid != "" {
 				event := models.Event{
 					UUID:        eventUuid,
-					UserId:      env.User.UUID,
+					UserId:      user.UUID,
 					Title:       r.FormValue("title"),
 					Description: r.FormValue("description"),
 				}
-				env.Repo.UpsertEvent(&event)
+				e.Repo.UpsertEvent(&event)
 
 				http.Redirect(w, r, "/-/events", http.StatusFound)
 			}
@@ -330,12 +332,12 @@ func EventPage(env *env.Env, t *template.Template) http.HandlerFunc {
 			if eventUuid != "" {
 				eventId, err := uuid.Parse(eventUuid)
 				if err != nil {
-					env.Log.Error("cannot parse event uuid", "error", err)
+					e.Log.Error("cannot parse event uuid", "error", err)
 					return
 				}
-				event, err := env.Repo.GetEventById(eventId)
+				event, err := e.Repo.GetEventById(eventId)
 				if err != nil {
-					env.Log.Error("cannot get the event from the db", "error", err)
+					e.Log.Error("cannot get the event from the db", "error", err)
 					return
 				}
 				pd.Event = event
@@ -376,14 +378,15 @@ type tokenPageData struct {
 	NewToken *models.Token // nil = show form; non-nil = show newly created token
 }
 
-func SettingsPage(env *env.Env, t *template.Template) http.HandlerFunc {
+func SettingsPage(e *env.Env, t *template.Template) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		page := "settings.html"
+		user := env.UserFromContext(r.Context())
 
 		if r.Method == "DELETE" {
 			tokenUuid := r.URL.Query().Get("token")
-			if err := env.Repo.DeleteToken(tokenUuid, env.User.UUID); err != nil {
-				env.Log.Error("delete token error", "error", err)
+			if err := e.Repo.DeleteToken(tokenUuid, user.UUID); err != nil {
+				e.Log.Error("delete token error", "error", err)
 			}
 			http.Redirect(w, r, "/-/settings", http.StatusTemporaryRedirect)
 			return
@@ -393,28 +396,28 @@ func SettingsPage(env *env.Env, t *template.Template) http.HandlerFunc {
 			r.ParseForm()
 			tz := r.FormValue("timezone")
 			if tz != "" {
-				if err := env.Repo.UpdateUserTimezone(env.User.UUID, tz); err != nil {
-					env.Log.Error("update timezone error", "error", err)
+				if err := e.Repo.UpdateUserTimezone(user.UUID, tz); err != nil {
+					e.Log.Error("update timezone error", "error", err)
 				} else {
-					env.User.Timezone = &tz
+					user.Timezone = &tz
 				}
 			}
 		}
 
-		userId, _ := uuid.Parse(env.User.UUID)
-		tokens, err := env.Repo.GetTokensByUserId(userId)
+		userId, _ := uuid.Parse(user.UUID)
+		tokens, err := e.Repo.GetTokensByUserId(userId)
 		if err != nil {
-			env.Log.Error("tokens query errored", "error", err)
+			e.Log.Error("tokens query errored", "error", err)
 			return
 		}
 
 		currentTimezone := "UTC"
-		if env.User.Timezone != nil && *env.User.Timezone != "" {
-			currentTimezone = *env.User.Timezone
+		if user.Timezone != nil && *user.Timezone != "" {
+			currentTimezone = *user.Timezone
 		}
 
 		pd := tokenListPageData{
-			pageData{"Laffaire Settings", "Laffaire", env.User},
+			pageData{"Laffaire Settings", "Laffaire", user},
 			tokens,
 			availableTimezones,
 			currentTimezone,
@@ -425,11 +428,12 @@ func SettingsPage(env *env.Env, t *template.Template) http.HandlerFunc {
 	}
 }
 
-func TokenPage(env *env.Env, t *template.Template) http.HandlerFunc {
+func TokenPage(e *env.Env, t *template.Template) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		page := "token.html"
+		user := env.UserFromContext(r.Context())
 		pd := tokenPageData{
-			pageData{"Laffaire Token", "Laffaire", env.User},
+			pageData{"Laffaire Token", "Laffaire", user},
 			nil,
 		}
 
@@ -439,18 +443,18 @@ func TokenPage(env *env.Env, t *template.Template) http.HandlerFunc {
 			if name != "" {
 				b := make([]byte, 32)
 				if _, err := rand.Read(b); err != nil {
-					env.Log.Error("failed to generate token", "error", err)
+					e.Log.Error("failed to generate token", "error", err)
 					return
 				}
 				token := models.Token{
 					UUID:      uuid.New().String(),
-					UserId:    env.User.UUID,
+					UserId:    user.UUID,
 					Name:      name,
 					Token:     fmt.Sprintf("%x", b),
 					CreatedAt: time.Now().UTC().Format(time.RFC3339),
 				}
-				if err := env.Repo.CreateToken(&token); err != nil {
-					env.Log.Error("create token error", "error", err)
+				if err := e.Repo.CreateToken(&token); err != nil {
+					e.Log.Error("create token error", "error", err)
 					return
 				}
 				pd.NewToken = &token
@@ -463,19 +467,19 @@ func TokenPage(env *env.Env, t *template.Template) http.HandlerFunc {
 	}
 }
 
-func ServePage(env *env.Env, t *template.Template) http.HandlerFunc {
+func ServePage(e *env.Env, t *template.Template) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		routeMatch, _ := regexp.Compile(`\/(\w+)`)
 		pd := pageData{
 			"Laffaire Home",
 			"Laffaire",
-			env.User,
+			env.UserFromContext(r.Context()),
 		}
 
 		matches := routeMatch.FindStringSubmatch(r.URL.Path)
 
-		env.Log.Debug("request", "path", r.URL.Path)
-		env.Log.Debug("request", "match", matches)
+		e.Log.Debug("request", "path", r.URL.Path)
+		e.Log.Debug("request", "match", matches)
 
 		if len(matches) >= 1 {
 			page := matches[1] + ".html"

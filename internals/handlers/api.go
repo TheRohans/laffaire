@@ -23,16 +23,16 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 // -------------------------------------------------------------------------
 // Events
 
-func APIGetEvents(env *env.Env) http.HandlerFunc {
+func APIGetEvents(e *env.Env) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		userId, err := uuid.Parse(env.User.UUID)
+		userId, err := uuid.Parse(env.UserFromContext(r.Context()).UUID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "invalid user id")
 			return
 		}
-		events, err := env.Repo.GetEventsByUserId(userId)
+		events, err := e.Repo.GetEventsByUserId(userId)
 		if err != nil {
-			env.Log.Error("GetEventsByUserId failed", "error", err)
+			e.Log.Error("GetEventsByUserId failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "could not retrieve events")
 			return
 		}
@@ -40,7 +40,7 @@ func APIGetEvents(env *env.Env) http.HandlerFunc {
 	}
 }
 
-func APICreateEvent(env *env.Env) http.HandlerFunc {
+func APICreateEvent(e *env.Env) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var input struct {
 			Title       string `json:"title"`
@@ -56,12 +56,12 @@ func APICreateEvent(env *env.Env) http.HandlerFunc {
 		}
 		event := models.Event{
 			UUID:        uuid.New().String(),
-			UserId:      env.User.UUID,
+			UserId:      env.UserFromContext(r.Context()).UUID,
 			Title:       input.Title,
 			Description: input.Description,
 		}
-		if err := env.Repo.UpsertEvent(&event); err != nil {
-			env.Log.Error("UpsertEvent failed", "error", err)
+		if err := e.Repo.UpsertEvent(&event); err != nil {
+			e.Log.Error("UpsertEvent failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "could not create event")
 			return
 		}
@@ -69,20 +69,20 @@ func APICreateEvent(env *env.Env) http.HandlerFunc {
 	}
 }
 
-func APIGetEvent(env *env.Env) http.HandlerFunc {
+func APIGetEvent(e *env.Env) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		eventId, err := uuid.Parse(mux.Vars(r)["id"])
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid event id")
 			return
 		}
-		event, err := env.Repo.GetEventById(eventId)
+		event, err := e.Repo.GetEventById(eventId)
 		if err != nil {
-			env.Log.Error("GetEventById failed", "error", err)
+			e.Log.Error("GetEventById failed", "error", err)
 			writeError(w, http.StatusNotFound, "event not found")
 			return
 		}
-		if event.UserId != env.User.UUID {
+		if event.UserId != env.UserFromContext(r.Context()).UUID {
 			writeError(w, http.StatusForbidden, "forbidden")
 			return
 		}
@@ -90,19 +90,19 @@ func APIGetEvent(env *env.Env) http.HandlerFunc {
 	}
 }
 
-func APIUpdateEvent(env *env.Env) http.HandlerFunc {
+func APIUpdateEvent(e *env.Env) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		eventId, err := uuid.Parse(mux.Vars(r)["id"])
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid event id")
 			return
 		}
-		existing, err := env.Repo.GetEventById(eventId)
+		existing, err := e.Repo.GetEventById(eventId)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "event not found")
 			return
 		}
-		if existing.UserId != env.User.UUID {
+		if existing.UserId != env.UserFromContext(r.Context()).UUID {
 			writeError(w, http.StatusForbidden, "forbidden")
 			return
 		}
@@ -122,8 +122,8 @@ func APIUpdateEvent(env *env.Env) http.HandlerFunc {
 
 		existing.Title = input.Title
 		existing.Description = input.Description
-		if err := env.Repo.UpsertEvent(existing); err != nil {
-			env.Log.Error("UpsertEvent failed", "error", err)
+		if err := e.Repo.UpsertEvent(existing); err != nil {
+			e.Log.Error("UpsertEvent failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "could not update event")
 			return
 		}
@@ -131,15 +131,15 @@ func APIUpdateEvent(env *env.Env) http.HandlerFunc {
 	}
 }
 
-func APIDeleteEvent(env *env.Env) http.HandlerFunc {
+func APIDeleteEvent(e *env.Env) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		eventId := mux.Vars(r)["id"]
 		if _, err := uuid.Parse(eventId); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid event id")
 			return
 		}
-		if err := env.Repo.DeleteEvent(eventId, env.User.UUID); err != nil {
-			env.Log.Error("DeleteEvent failed", "error", err)
+		if err := e.Repo.DeleteEvent(eventId, env.UserFromContext(r.Context()).UUID); err != nil {
+			e.Log.Error("DeleteEvent failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "could not delete event")
 			return
 		}
@@ -150,7 +150,7 @@ func APIDeleteEvent(env *env.Env) http.HandlerFunc {
 // -------------------------------------------------------------------------
 // Entries
 
-func APIGetEntries(env *env.Env) http.HandlerFunc {
+func APIGetEntries(e *env.Env) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		eventId, err := uuid.Parse(mux.Vars(r)["id"])
 		if err != nil {
@@ -158,19 +158,19 @@ func APIGetEntries(env *env.Env) http.HandlerFunc {
 			return
 		}
 		// Verify the event belongs to this user
-		event, err := env.Repo.GetEventById(eventId)
+		event, err := e.Repo.GetEventById(eventId)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "event not found")
 			return
 		}
-		if event.UserId != env.User.UUID {
+		if event.UserId != env.UserFromContext(r.Context()).UUID {
 			writeError(w, http.StatusForbidden, "forbidden")
 			return
 		}
 
-		entries, err := env.Repo.GetEntriesByEventId(eventId)
+		entries, err := e.Repo.GetEntriesByEventId(eventId)
 		if err != nil {
-			env.Log.Error("GetEntriesByEventId failed", "error", err)
+			e.Log.Error("GetEntriesByEventId failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "could not retrieve entries")
 			return
 		}
@@ -178,7 +178,7 @@ func APIGetEntries(env *env.Env) http.HandlerFunc {
 	}
 }
 
-func APICreateEntry(env *env.Env) http.HandlerFunc {
+func APICreateEntry(e *env.Env) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var input struct {
 			EventId     string `json:"event_id"`
@@ -206,12 +206,12 @@ func APICreateEntry(env *env.Env) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "invalid event_id")
 			return
 		}
-		event, err := env.Repo.GetEventById(eventId)
+		event, err := e.Repo.GetEventById(eventId)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "event not found")
 			return
 		}
-		if event.UserId != env.User.UUID {
+		if event.UserId != env.UserFromContext(r.Context()).UUID {
 			writeError(w, http.StatusForbidden, "forbidden")
 			return
 		}
@@ -229,8 +229,8 @@ func APICreateEntry(env *env.Env) http.HandlerFunc {
 			Location:    input.Location,
 			Private:     input.Private,
 		}
-		if err := env.Repo.UpsertEntry(&entry); err != nil {
-			env.Log.Error("UpsertEntry failed", "error", err)
+		if err := e.Repo.UpsertEntry(&entry); err != nil {
+			e.Log.Error("UpsertEntry failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "could not create entry")
 			return
 		}
@@ -238,16 +238,16 @@ func APICreateEntry(env *env.Env) http.HandlerFunc {
 	}
 }
 
-func APIGetEntry(env *env.Env) http.HandlerFunc {
+func APIGetEntry(e *env.Env) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		entryId, err := uuid.Parse(mux.Vars(r)["id"])
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid entry id")
 			return
 		}
-		entry, err := env.Repo.GetEntryById(entryId)
+		entry, err := e.Repo.GetEntryById(entryId)
 		if err != nil {
-			env.Log.Error("GetEntryById failed", "error", err)
+			e.Log.Error("GetEntryById failed", "error", err)
 			writeError(w, http.StatusNotFound, "entry not found")
 			return
 		}
@@ -257,8 +257,8 @@ func APIGetEntry(env *env.Env) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "invalid event reference")
 			return
 		}
-		event, err := env.Repo.GetEventById(eventId)
-		if err != nil || event.UserId != env.User.UUID {
+		event, err := e.Repo.GetEventById(eventId)
+		if err != nil || event.UserId != env.UserFromContext(r.Context()).UUID {
 			writeError(w, http.StatusForbidden, "forbidden")
 			return
 		}
@@ -266,14 +266,14 @@ func APIGetEntry(env *env.Env) http.HandlerFunc {
 	}
 }
 
-func APIUpdateEntry(env *env.Env) http.HandlerFunc {
+func APIUpdateEntry(e *env.Env) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		entryId, err := uuid.Parse(mux.Vars(r)["id"])
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid entry id")
 			return
 		}
-		existing, err := env.Repo.GetEntryById(entryId)
+		existing, err := e.Repo.GetEntryById(entryId)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "entry not found")
 			return
@@ -283,8 +283,8 @@ func APIUpdateEntry(env *env.Env) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "invalid event reference")
 			return
 		}
-		event, err := env.Repo.GetEventById(eventId)
-		if err != nil || event.UserId != env.User.UUID {
+		event, err := e.Repo.GetEventById(eventId)
+		if err != nil || event.UserId != env.UserFromContext(r.Context()).UUID {
 			writeError(w, http.StatusForbidden, "forbidden")
 			return
 		}
@@ -319,8 +319,8 @@ func APIUpdateEntry(env *env.Env) http.HandlerFunc {
 		existing.Location = input.Location
 		existing.Private = input.Private
 
-		if err := env.Repo.UpsertEntry(existing); err != nil {
-			env.Log.Error("UpsertEntry failed", "error", err)
+		if err := e.Repo.UpsertEntry(existing); err != nil {
+			e.Log.Error("UpsertEntry failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "could not update entry")
 			return
 		}
@@ -328,14 +328,14 @@ func APIUpdateEntry(env *env.Env) http.HandlerFunc {
 	}
 }
 
-func APIDeleteEntry(env *env.Env) http.HandlerFunc {
+func APIDeleteEntry(e *env.Env) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		entryId, err := uuid.Parse(mux.Vars(r)["id"])
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid entry id")
 			return
 		}
-		existing, err := env.Repo.GetEntryById(entryId)
+		existing, err := e.Repo.GetEntryById(entryId)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "entry not found")
 			return
@@ -345,14 +345,14 @@ func APIDeleteEntry(env *env.Env) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "invalid event reference")
 			return
 		}
-		event, err := env.Repo.GetEventById(eventId)
-		if err != nil || event.UserId != env.User.UUID {
+		event, err := e.Repo.GetEventById(eventId)
+		if err != nil || event.UserId != env.UserFromContext(r.Context()).UUID {
 			writeError(w, http.StatusForbidden, "forbidden")
 			return
 		}
 
-		if err := env.Repo.DeleteEntry(entryId.String(), existing.EventId); err != nil {
-			env.Log.Error("DeleteEntry failed", "error", err)
+		if err := e.Repo.DeleteEntry(entryId.String(), existing.EventId); err != nil {
+			e.Log.Error("DeleteEntry failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "could not delete entry")
 			return
 		}

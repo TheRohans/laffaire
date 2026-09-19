@@ -327,7 +327,7 @@ func apiUnauthorized(w http.ResponseWriter) {
 	w.Write([]byte(`{"error":"unauthorized"}`))
 }
 
-func APILoginVerify(env *env.Env, repo *repository.DataRepository) mux.MiddlewareFunc {
+func APILoginVerify(e *env.Env, repo *repository.DataRepository) mux.MiddlewareFunc {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Bearer token takes priority — allows API clients to authenticate
@@ -337,12 +337,11 @@ func APILoginVerify(env *env.Env, repo *repository.DataRepository) mux.Middlewar
 				tokenValue := strings.TrimPrefix(auth, "Bearer ")
 				user, err := repo.GetUserByToken(tokenValue)
 				if err != nil {
-					env.Log.Error("bearer token not found", "error", err)
+					e.Log.Error("bearer token not found", "error", err)
 					apiUnauthorized(w)
 					return
 				}
-				env.User = user
-				next.ServeHTTP(w, r)
+				next.ServeHTTP(w, r.WithContext(env.WithUser(r.Context(), user)))
 				return
 			}
 
@@ -373,26 +372,25 @@ func APILoginVerify(env *env.Env, repo *repository.DataRepository) mux.Middlewar
 				return
 			}
 
-			env.User = user
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, r.WithContext(env.WithUser(r.Context(), user)))
 		})
 	}
 }
 
-func LoginVerify(env *env.Env, repo *repository.DataRepository) mux.MiddlewareFunc {
+func LoginVerify(e *env.Env, repo *repository.DataRepository) mux.MiddlewareFunc {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			cookie, err := r.Cookie(cookieName)
 			// No cookie at all...
 			if err != nil {
-				env.Log.Error("missing auth token")
+				e.Log.Error("missing auth token")
 				http.Redirect(w, r, "/login", http.StatusForbidden)
 				return
 			}
 
 			// Cookie, but no value
 			if cookie.Value == "" {
-				env.Log.Error("missing auth token")
+				e.Log.Error("missing auth token")
 				http.Redirect(w, r, "/login", http.StatusForbidden)
 				return
 			}
@@ -401,30 +399,29 @@ func LoginVerify(env *env.Env, repo *repository.DataRepository) mux.MiddlewareFu
 			parts := strings.Split(cookie.Value, ":")
 			uuid, err := uuid.Parse(parts[0])
 			if err != nil {
-				env.Log.Error("UUID malformed")
+				e.Log.Error("UUID malformed")
 				http.Redirect(w, r, "/login", http.StatusForbidden)
 				return
 			}
 
 			user, err := repo.GetUserById(uuid)
 			if err != nil {
-				env.Log.Error("UUID not found")
+				e.Log.Error("UUID not found")
 				http.Redirect(w, r, "/login", http.StatusForbidden)
 				return
 			}
-			env.User = user
 
 			// Well formatted cookie, but hash changed for some reason
 			hashString := fmt.Sprintf("%s%s%s", user.Email, user.AuthId, *user.Salt)
 			hash := md5.Sum([]byte(hashString))
 			if fmt.Sprintf("%x", hash) != parts[1] {
-				env.Log.Error("hashes don't match. login might have expired")
+				e.Log.Error("hashes don't match. login might have expired")
 				http.Redirect(w, r, "/login", http.StatusForbidden)
 				return
 			}
 
 			// Ok, not thing wrong, move on
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, r.WithContext(env.WithUser(r.Context(), user)))
 		})
 	}
 }
