@@ -52,7 +52,6 @@ docker_build:
 	docker buildx build --platform linux/amd64 -t $(DOCKER_CONTAINER):$(HASH) .
 
 docker_push:
-	docker ps ; \
 	docker push $(DOCKER_CONTAINER):$(HASH)
 
 #	Using a different enviroment variable set for prod
